@@ -22,7 +22,8 @@ pip install --upgrade pip # upgrade pip, it's usually a little out of date from 
 pip install -r requirements.txt # install the required libraries listed in the 
 ```
 
-## Running the application:
+## Running the application
 
+TODO: Write this part.
 
 

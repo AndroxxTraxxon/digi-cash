@@ -1,0 +1,40 @@
+{
+  "token" : {
+    "type" : "dict",
+    "properties" : {
+      "amount" : "float",
+      "uuid" : {
+        "type" : "str",
+        "format" : "uuid"
+      },
+      "created_datetime" : {
+        "type" : "str",
+        "format" : "datetime"
+      },
+      "identities":  {
+        "type" : "list",
+        "length" : 10,
+        "format" : {
+          "identity" : {
+            "type": "list",
+            "length": 2,
+            "format": "str"
+          },
+          "checksum" : {
+            "type" : "list",
+            "length" : 2,
+            "format" : "str"
+          }
+        }
+      }
+    }
+  },
+  "checksum" : "str",
+  "signature" : "str",
+  "merchant_bitstring" : {
+    "type": "str",
+    "length": 10,
+    "format": "bitstring"
+  },
+  "identity_keys" : "str"
+}

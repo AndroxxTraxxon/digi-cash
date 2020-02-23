@@ -8,6 +8,10 @@ import os
 from io import StringIO
 import uuid
 import pprint
+import os
+
+_current_dir = os.path.dirname(os.path.realpath(__file__))
+  
 
 def generateIdentities(identityString:str, quantity:int = 5, block_size:int = 32) -> tuple:
   
@@ -52,7 +56,7 @@ def generateIdentities(identityString:str, quantity:int = 5, block_size:int = 32
 def generateToken(amount: float, identity:str) -> dict:
   token = dict()
   token["amount"] = amount
-  token["uuid"] = uuid.uuid4().hex
+  token["uuid"] = str(uuid.uuid4())
   token["createdDate"] = datetime.datetime.now().isoformat()
   id_keys, token["identities"] = generateIdentities(identity)
 
@@ -72,6 +76,12 @@ tokens = dict()
 for i in range(5):
   token = generateToken(1000, "Hello, World!")
   tokens[token["checksum"]] = token
+  with open(os.path.join(
+    _current_dir,
+    "tokens",
+    "%s.token.json"%token["checksum"]
+  ), "w+") as token_file:
+    json.dump(token, token_file)
 
 pprint.pprint(tokens)
 
