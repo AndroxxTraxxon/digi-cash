@@ -3,7 +3,6 @@ import werkzeug.exceptions as w_ex
 
 
 import bank_logic
-from bank_data import MerchantDuplicateViolation, ClientDuplicateViolation, TokenAlreadyRedeemed
 
 web = Flask("digi-cash-bank")
 
@@ -34,13 +33,15 @@ def redeem_token():
         "status" : "success"
       })
     except bank_logic.BadTokenFormat as e:
-      abort(400, "Token does not have the correct format.")
+      abort(400, str(e))
     except bank_logic.BadSignature as e:
       abort(400, "The signature on this token is incorrect.")
-    except MerchantDuplicateViolation as e:
-      abort(400, "The merchant has attempted to redeem again.")
-    except ClientDuplicateViolation as e:
-      abort(400, "The client has attempted to redeem again.")
+    except bank_logic.ChecksumConflict as e:
+      abort(400, str(e))
+    except bank_logic.MerchantSpentAgain as e:
+      abort(403, "The merchant has attempted to redeem again.")
+    except bank_logic.ClientSpentAgain as e:
+      abort(403, "The client has attempted to redeem again.")
   else:
     abort(400, "Token must be in JSON format!")
 

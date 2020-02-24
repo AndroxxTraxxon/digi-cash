@@ -19,9 +19,6 @@ def generateIdentities(identityString:str, quantity:int = 5, block_size:int = 32
     bs = block_size
     return bytes(s + (bs - len(s) % bs) * chr(bs - len(s) % bs), 'utf-8')
 
-  def unpad_bytes(s):
-    return s[: -ord(s[len(s) - 1:])]
-
   def xor_bytes(a, b):
     return bytes(tuple(_a^ _b for _a, _b in zip(a, b)))
 
@@ -47,17 +44,11 @@ def generateIdentities(identityString:str, quantity:int = 5, block_size:int = 32
     })
   return keys, identities
 
-
-
-
-    
-
-
 def generateToken(amount: float, identity:str) -> dict:
   token = dict()
   token["amount"] = amount
   token["uuid"] = str(uuid.uuid4())
-  token["createdDate"] = datetime.datetime.now().isoformat()
+  token["created_datetime"] = datetime.datetime.now().isoformat()
   id_keys, token["identities"] = generateIdentities(identity)
 
   # pprint.pprint(token)
@@ -67,9 +58,7 @@ def generateToken(amount: float, identity:str) -> dict:
   return {
     "token": token,
     "checksum": checksum,
-    "id_keys": id_keys,
-    "merchant_pattern":None,
-    "revealed_id": None
+    "identity_keys": id_keys
   }
 
 tokens = dict()
