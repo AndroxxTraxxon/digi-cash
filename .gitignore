@@ -1,4 +1,6 @@
 **/__pycache__
 __venv__
+venv
+.idea
 client/tokens/*
 .vscode
