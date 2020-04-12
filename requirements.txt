@@ -1,3 +1,4 @@
 PyCryptodome
 flask
 rsa
+requests

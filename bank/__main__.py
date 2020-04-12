@@ -1,8 +1,7 @@
 from flask import Flask, jsonify, request, Response, abort
 import werkzeug.exceptions as w_ex
-
-
 import bank_logic
+import math
 
 web = Flask("digi-cash-bank")
 
@@ -42,12 +41,80 @@ def redeem_token():
       abort(403, "The merchant has attempted to redeem again.")
     except bank_logic.ClientSpentAgain as e:
       abort(403, "The client has attempted to redeem again.")
+    except Exception as e:
+      abort(500, "Unknown error: " + str(e))
+
   else:
-    abort(400, "Token must be in JSON format!")
+    abort(400, "Message must be in JSON format!")
+
+
+@web.route("/open-request", methods=["POST"])
+def open_signing_request():
+  if request.is_json:
+    checksums = request.json
+    try:
+      keep, session_id = bank_logic.open_signing_request(checksums)
+      return jsonify({
+        "keep": keep,
+        "session_id": session_id,
+        "status": "success"
+      })
+    except Exception as e:
+      abort(500, "Unknown error: " + str(e))
+      
+  else:
+    abort(400, "Message must be in JSON format!")
+
+@web.route("/fill-request", methods=["POST"])
+def fill_signing_request():
+  """
+  Expected request format:
+
+  {
+    "session_id": <session id>,
+    "tokens": {
+      <token 1 checksum> : {
+        "key": <full key 1>, 
+        "token": <full token 1>
+      },
+      <token 2 checksum> : [<full token 2>,
+      ...
+    }
+  }
+  """
+  if request.is_json:
+    try:
+      tokens_to_validate = request.json.get("tokens")
+      session_id = request.json.get("session_id")
+      return jsonify({
+        "signature": bank_logic.fill_signing_request(session_id, tokens_to_validate),
+        "status": "success"
+      })
+    except Exception as e:
+      abort(500, "Unknown error: " + str(e))
+
+  else:
+    abort(400, "Message must be in JSON format!")
+
+@web.route("/public-key", methods=["GET"])
+def public_key():
+  try:
+    return jsonify({
+      "key": bank_logic.get_public_key().to_bytes(128, 'big').hex(), # generated 128-byte number
+      "key_len": 128,
+      "modulus": bank_logic.get_public_modulus().to_bytes(256, 'big').hex(), # product of 2 128-byte numbers
+      "modulus_len": 256,
+      "status": "success"
+    })
+  except Exception as e:
+    abort(500, "Unknown error: " + str(e))
+
+    
+
 
 @web.route("/", methods=["GET"])
 def hello_world():
   return "Hello, World!", 200
 
 if __name__ == "__main__":
-  web.run()
+  web.run(port=5000)

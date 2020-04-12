@@ -9,6 +9,9 @@ from io import StringIO
 import uuid
 import pprint
 import os
+from blind_sig_util import modulo_multiplicative_inverse
+
+import requests
 
 _current_dir = os.path.dirname(os.path.realpath(__file__))
   
@@ -61,20 +64,83 @@ def generateToken(amount: float, identity:str) -> dict:
     "identity_keys": id_keys
   }
 
+
+response = requests.get("http://localhost:5000/public-key")
+data = response.json()
+e = int.from_bytes(bytes.fromhex(data.get("key")), 'big')
+n = int.from_bytes(bytes.fromhex(data.get("modulus")), 'big')
+n_len = data.get("modulus_len")
+
+
+# k = int.from_bytes(Random.get_random_bytes(128), 'big')
+# k_inv = modulo_multiplicative_inverse(k, n)
+
+# message = "Hello World"
+# M = int.from_bytes(hashlib.sha256(message.encode('utf-8')).digest(), 'big')
+
+# print(M)
+# C = (M*pow(k, e, n)) % n
+# print(C)
+# Ch = C.to_bytes(len(data.get("modulus"))//2, 'big')
+# print(Ch)
+
+
+# generate tokens for request.
+
 tokens = dict()
 for i in range(5):
   token = generateToken(1000, "Hello, World!")
-  tokens[token["checksum"]] = token
-  with open(os.path.join(
-    _current_dir,
-    "tokens",
-    "%s.token.json"%token["checksum"]
-  ), "w+") as token_file:
-    json.dump(token, token_file)
-
-pprint.pprint(tokens)
-
-pprint.pprint([*tokens.keys()])
+  k = int.from_bytes(Random.get_random_bytes(128), 'big')
+  k_inv = modulo_multiplicative_inverse(k, n)
+  token["key"] = k
+  token["key-inverse"] = k_inv
   
+  M = int.from_bytes(bytes.fromhex(token["checksum"]), 'big')
+  C = (M*pow(k, e, n)) % n
+  C = C.to_bytes(n_len, 'big').hex()
+
+  tokens[C] = token
+  # print(C, end="\n\n")
+
+checksums = list(tokens.keys())
+print(checksums)
+
+# open request with bank
+response = requests.post("http://localhost:5000/open-request", json=checksums)
+data = response.json()
+print("\nOpen request: \n" + str(data))
+
+keep = data["keep"]
+# send requested tokens
+response = requests.post("http://localhost:5000/fill-request", json={
+  "session_id": data.get("session_id"),
+  "tokens": {key: value for key, value in tokens.items() if key != keep}
+})
+signature = None
+try:
+  data = response.json()
+  print("\n Fill request: " + str(data))
+  signature = int.from_bytes(bytes.fromhex(data.get("signature")), 'big')
+except Exception as e:
+  print(e)
+  print("Fill request Failed: \n" + response.text)
+
+print("\n%d" % signature)
+
+# validate signature
+token = tokens[keep]
+checksum = int.from_bytes(bytes.fromhex(token["checksum"]), 'big')
+t_inv = token["key-inverse"]
+
+signature = (signature * t_inv) % n
+_validation = pow(signature, e, n)
+
+print(_validation)
+print(checksum)
+
+print(_validation == checksum)
 
 
+
+
+  

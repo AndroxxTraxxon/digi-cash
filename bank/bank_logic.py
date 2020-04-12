@@ -6,6 +6,8 @@ import uuid
 import base64
 import os
 import hashlib
+import rsa
+import random
 from Crypto.Cipher import AES
 
 class TokenFormatMalformed(ValueError):
@@ -32,7 +34,17 @@ class MerchantSpentAgain(TokenAlreadyRedeemed):
 class ClientSpentAgain(TokenAlreadyRedeemed):
   pass
 
+class InvalidSession(ValueError):
+  pass
+
+class MissingToken(ValueError):
+  """ To be raised when validating collection of tokens not signed by the bank, and a token is missing"""
+  pass
+
 _current_dir = os.path.dirname(os.path.realpath(__file__))
+
+_sessions = dict()
+
 
 def _bitstring_decode(value:str):
   output = list()
@@ -54,7 +66,7 @@ def verify_format(token:dict):
       "list" : list,
       "dict" : dict,
       "float" : float,
-      "int": int, 
+      "int": int,
     }
 
     _string_formats = {
@@ -84,7 +96,7 @@ def verify_format(token:dict):
       if _type is None:
         if expected_format["type"] == "enum":
           if not isinstance(expected_format.get("options"), list):
-            raise TokenFormatMalformed("Enum options not defined for %"% fullPath)
+            raise TokenFormatMalformed("Enum options not defined for %s"% fullPath)
         raise BadTokenFormat("Unknown type for %s: %s" % (fullPath, str(item)))
       if not isinstance(item, _type):
         raise BadTokenFormat("Token has incorrect value for %s : %s; expected type %s"%(fullPath, item.__class__.__name__, expected_format["type"]))
@@ -125,7 +137,7 @@ def verify_format(token:dict):
             if isinstance(_expected_item_format, str):
               _check_format_str(i, fullPath + "[%d]"%index, _expected_item_format)
             elif isinstance(_expected_item_format, dict):
-              _check_format_dict(_expected_item_format, i, parent=fullPath + "[%d]"%index)
+              _check_format_dict(i, _expected_item_format, index, parent=fullPath + "[%d]"%index)
             else:
               raise TokenFormatMalformed("Unexpected format for %s"%fullPath)
 
@@ -138,7 +150,7 @@ def verify_format(token:dict):
           print(token, _format)
           if token.get(key) is None:
             raise BadTokenFormat("Expected value for %s, found None" % key)
-          _check_format_str(token[key], key, value, parent=parent)
+          _check_format_str(token[key], key, value)
         else:
           raise TokenFormatMalformed("Unexpected value in token format")
   
@@ -158,7 +170,6 @@ def verify_checksum(token:dict):
   if reported_checksum != hashlib.sha256(json.dumps(token["token"]).encode("utf-8")).hexdigest():
     raise ChecksumConflict("Token does not match its checksum!")
   return True
-
 
 def verify_revealed_identities(token:dict):
 
@@ -206,3 +217,33 @@ def redeem_token(token:dict):
   else:
     bank_data.redeem_token(token)
   return token["checksum"]
+
+def open_signing_request(tokens_to_validate):
+  session_id = str(uuid.uuid4())
+  keep = random.choice(tokens_to_validate)
+  tokens_to_validate.remove(keep)
+  _sessions[session_id] = tokens_to_validate, keep
+  return keep, session_id
+
+def fill_signing_request(session_id, tokens):
+  if session_id in _sessions:
+    checksums, checksum_to_sign = _sessions[session_id]
+    del _sessions[session_id]
+    for checksum, token in tokens.items():
+      if checksum not in checksums:
+        raise ValueError("This token never appeared in the query: %s" % checksum)
+
+    d = bank_data.get_private_key()
+    n = bank_data.get_public_modulus()
+
+    t = int.from_bytes(bytes.fromhex(checksum_to_sign), 'big')
+    return pow(t, d, n).to_bytes(256, 'big').hex()
+
+  else:
+    raise InvalidSession("Invalid session token")
+
+def get_public_key():
+  return bank_data.get_public_key()
+
+def get_public_modulus():
+  return bank_data.get_public_modulus()
