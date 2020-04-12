@@ -232,6 +232,7 @@ def fill_signing_request(session_id, tokens):
     for checksum, token in tokens.items():
       if checksum not in checksums:
         raise ValueError("This token never appeared in the query: %s" % checksum)
+      # do full validation of all the tokens
 
     d = bank_data.get_private_key()
     n = bank_data.get_public_modulus()
