@@ -1,5 +1,7 @@
 from Crypto import Random
 from Crypto.Random import random
+import hashlib
+from util.custom_exceptions import BadSignature, ChecksumConflict
 def is_prime(n, k=128):
     """ Test if a number is prime        
         Args:
@@ -111,7 +113,7 @@ def extended_euclid_gcd(a, b):
     
 
 def generate_keychain():
-    print("Generating Public/Private keychain")
+    print("Generating Public/Private Keychain")
     p = generate_prime_number()
     q = p
     while q == p:
@@ -124,4 +126,25 @@ def generate_keychain():
         e = generate_prime_number()
 
     d = modulo_multiplicative_inverse(e, phi)
+    print("Done Generating Keychain")
     return (e, d, n)
+
+def validate_signature(checksum:int, signature:int, key:tuple, verbose=False):
+    _validation = pow(signature, *key) # key format: (e, n) : (public key, public modulus)
+    if verbose:
+        print(_validation)
+        print(checksum)
+    if checksum != _validation:
+        raise BadSignature()
+    return True
+
+def validate_checksum(data:bytes, checksum:bytes, verbose=False):
+    if isinstance(data, str):
+        data = data.encode('utf-8')
+    _validation = hashlib.sha256(data).digest()
+    if verbose:
+        print(_validation)
+        print(checksum)
+    if checksum != _validation:
+        raise ChecksumConflict()
+    return True

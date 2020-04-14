@@ -1,4 +1,6 @@
-from blind_sig_util import generate_keychain
+import sys, os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+from util.blind_signatures import generate_keychain
 
 redeemed_tokens = dict()
 
