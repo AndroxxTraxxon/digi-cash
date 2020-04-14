@@ -2,6 +2,7 @@ import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 from flask import Flask, jsonify, request, Response, abort
 import bank.logic as logic
+import traceback
 
 
 web = Flask("digi-cash-bank")
@@ -61,6 +62,7 @@ def open_signing_request():
         "status": "success"
       })
     except Exception as e:
+      traceback.print_exc()
       abort(500, "Unknown error: " + str(e))
       
   else:
@@ -92,6 +94,7 @@ def fill_signing_request():
         "status": "success"
       })
     except Exception as e:
+      traceback.print_exc()
       abort(500, "Unknown error: " + str(e))
 
   else:

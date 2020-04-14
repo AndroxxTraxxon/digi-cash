@@ -16,6 +16,7 @@ from util.token_format import (
   TokenFormatMalformed #  Exception: Raised when token format file is malformed
 )
 from util.custom_exceptions import BadSignature, ChecksumConflict
+from util import blind_signatures
 
 class TokenAlreadyRedeemed(ValueError):
   """ To be raised when a token is provided for redemption a second time. """
@@ -40,65 +41,41 @@ class MissingToken(ValueError):
 _sessions = dict()
 
 def verify_signature(token:dict):
-  signature = token.get("signature")
-  checksum = token.get("checksum")
-  if signature is None:
-    raise BadSignature("Signature does not exist")
+  signature = int.from_bytes(bytes.fromhex(token.get("signature")), "big")
+  checksum = int.from_bytes(bytes.fromhex(token.get("checksum")), "big")
+  blind_signatures.validate_signature(checksum, signature, (get_public_key(), get_public_modulus()))
+  return True
 
 def verify_checksum(token:dict):
-  reported_checksum = token.get("checksum")
-  # if this fails for valid tokens, use OrderedDict to fix the order of the dictionaries. (Necessary for python <= 3.6)
-  if reported_checksum is None:
-    raise BadTokenFormat("There is no checksum")
-  if reported_checksum != hashlib.sha256(json.dumps(token["token"]).encode("utf-8")).hexdigest():
-    raise ChecksumConflict("Token does not match its checksum!")
+  blind_signatures.validate_checksum(json.dumps(token["token"]), bytes.fromhex(token["checksum"]))
   return True
 
-def verify_revealed_identities(token:dict):
-  def unpad_bytes(s):
-    return s[: -ord(s[len(s) - 1:])]
-
-  def _decrypt_padded(ciphertext, key):
-    enc = bytes.fromhex(ciphertext)
-    iv = enc[: AES.block_size]
-    key = bytes.fromhex(key)
-    cipher = AES.new(key, AES.MODE_CBC, iv)
-    try:
-      return unpad_bytes(
-        cipher.decrypt(
-          enc[AES.block_size:]
-        )
-      ).decode("utf-8")
-    except UnicodeDecodeError:
-      raise ValueError("Unable to decrypt ciphertext.")
-
-
-  merchant_bitstring = token["identity-pattern"]
-  print(merchant_bitstring)
-  identities = token["token"]["identities"]
-  keys = token["identity_keys"]
-  for index, (b, (i, c), k) in enumerate(zip(merchant_bitstring, identities, keys)):
-    i,c, k = i[b], c[b], k[b]
-    if hashlib.sha256(i.encode("utf-8")).hexdigest() != c:
-      raise ChecksumConflict("Identity at index %d does not generate its checksum!" % index)
+def verify_revealed_identities(claim:dict):
+  merchant_bitstring = claim["identity-pattern"]
+  checksums = [identity["checksum"] for identity in claim["token"]["identities"]]
+  revealed_identities = claim["revealed-identities"]
+  for toggle, checksum, identity in zip(merchant_bitstring, checksums, revealed_identities):
+    checksum = bytes.fromhex(checksum[toggle])
+    identity = bytes.fromhex(identity)
+    blind_signatures.validate_checksum(identity, checksum)
   return True
 
-def redeem_token(token:dict):
-  verify_format(token)
-  verify_checksum(token)
-  # verify_signature(token)
-  # verify_revealed_identities(token)
-  existing_token = data.get_token(token["token"]["uuid"])
+def redeem_token(claim:dict):
+  verify_format(claim)
+  verify_checksum(claim)
+  verify_signature(claim)
+  verify_revealed_identities(claim)
+  existing_token = data.get_token(claim["token"]["uuid"])
   if(existing_token is not None):
     existing_bitstring = existing_token["identity-pattern"]
-    new_bitstring = token["identity-pattern"]
+    new_bitstring = claim["identity-pattern"]
     if existing_bitstring == new_bitstring:
       raise MerchantSpentAgain()
     else:
       raise ClientSpentAgain()
   else:
-    data.redeem_token(token)
-  return token["checksum"]
+    data.redeem_token(claim)
+  return claim["checksum"]
 
 def open_signing_request(tokens_to_validate):
   session_id = str(uuid.uuid4())
@@ -107,14 +84,17 @@ def open_signing_request(tokens_to_validate):
   _sessions[session_id] = tokens_to_validate, keep
   return keep, session_id
 
-def fill_signing_request(session_id, tokens):
+def fill_signing_request(session_id, claims):
   if session_id in _sessions:
     checksums, checksum_to_sign = _sessions[session_id]
     del _sessions[session_id]
-    for checksum, token in tokens.items():
+    for checksum, claim in claims.items():
       if checksum not in checksums:
         raise ValueError("This token never appeared in the query: %s" % checksum)
+
       # do full validation of all the tokens
+      verify_checksum(claim)      
+      verify_format(claim)
 
     d = data.get_private_key()
     n = data.get_public_modulus()

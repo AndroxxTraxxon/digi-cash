@@ -42,6 +42,7 @@ def redeem_token(claim):
 def fill_request(session_id, keys):
     try:
         claim, pattern = _sessions[session_id]
+        del _sessions[session_id]
         identities = claim["token"]["identities"]
         decrypted_identities = []
         for index, (key, id_obj, toggle) in enumerate(zip(keys, identities, pattern)):
