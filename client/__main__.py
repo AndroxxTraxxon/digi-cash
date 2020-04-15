@@ -10,7 +10,7 @@ import json
 from Crypto.Cipher import AES
 from Crypto import Random
 import hashlib
-from util.encryption import aes_encrypt
+from util.encryption import aes_encrypt, _pad, xor_bytes
 
 
 _current_dir = os.path.dirname(os.path.realpath(__file__))
@@ -18,16 +18,9 @@ _current_dir = os.path.dirname(os.path.realpath(__file__))
 
 def generateIdentities(identityString: str, quantity: int = 5, block_size: int = 32) -> tuple:
 
-    def pad_bytes(s):
-        bs = block_size
-        return bytes(s + (bs - len(s) % bs) * chr(bs - len(s) % bs), 'utf-8')
-
-    def xor_bytes(a, b):
-        return bytes(tuple(_a ^ _b for _a, _b in zip(a, b)))
-
     keys, identities = [], []
     for i in range(quantity):
-        _id_string = pad_bytes(("Identity %d:" % i) + identityString)
+        _id_string = _pad(bytes("%010d: %s" % (i, identityString), 'utf-8'))
         otp = Random.get_random_bytes(len(_id_string))
         _id_string = xor_bytes(otp, _id_string)
 
@@ -47,16 +40,18 @@ def generateIdentities(identityString: str, quantity: int = 5, block_size: int =
 
 
 def generateToken(amount: float, identity: str) -> dict:
+    print("Creating Money Order token worth $%.02f \nfor '%s'" % (amount, identity))
     token = dict()
     token["amount"] = amount
     token["uuid"] = str(uuid.uuid4())
     token["created_datetime"] = datetime.datetime.now().isoformat()
     id_keys, token["identities"] = generateIdentities(identity)
 
-    # pprint.pprint(token)
     token_json = json.dumps(token)
     checksum = hashlib.sha256(token_json.encode("utf-8")).hexdigest()
-    # pprint.pprint(id_keys)
+
+    print("Token checksum: %s" % checksum[:16])
+
     return {
         "token": token,
         "checksum": checksum,
@@ -64,16 +59,37 @@ def generateToken(amount: float, identity: str) -> dict:
     }
 
 
-def orderToken():
+def orderToken(modifiers):
     response = requests.get("http://localhost:5000/public-key")
     data = response.json()
     e = int.from_bytes(bytes.fromhex(data.get("key")), 'big')
     n = int.from_bytes(bytes.fromhex(data.get("modulus")), 'big')
     n_len = data.get("modulus_len")
-
+    
+    num_tokens = 5
+    amount = 1000
     tokens = dict()
-    for _ in range(5):
-        token = generateToken(1000, "Hello, World!")
+    identity = "Samwise Gamgee | #123456789"
+    if(modifiers and modifiers[0] == "malicious"):
+        token = None
+        if len(modifiers) > 1 and modifiers[1] == "identity":
+            token = generateToken(amount, "Frodo Baggins | #987654321")
+        else:
+            token = generateToken(amount * 1000, identity)
+        k = int.from_bytes(Random.get_random_bytes(128), 'big')
+        k_inv = modulo_multiplicative_inverse(k, n)
+        token["key"] = k
+        token["key-inverse"] = k_inv
+
+        M = int.from_bytes(bytes.fromhex(token["checksum"]), 'big')
+        C = (M*pow(k, e, n)) % n
+        C = C.to_bytes(n_len, 'big').hex()
+
+        tokens[C] = token
+        num_tokens -= 1
+
+    for _ in range(num_tokens):
+        token = generateToken(amount, identity)
         k = int.from_bytes(Random.get_random_bytes(128), 'big')
         k_inv = modulo_multiplicative_inverse(k, n)
         token["key"] = k
@@ -88,7 +104,8 @@ def orderToken():
 
     checksums = list(tokens.keys())
     print("Generated tokens: ", *map(lambda x:"\n" + x[:16], checksums))
-
+    with open(os.path.join(_current_dir, "tokens", "(1) token_checksums.json"), "w+") as token_output:
+        json.dump(checksums, token_output, indent=4)
     # open request with bank
     response = requests.post(
         "http://localhost:5000/open-request", json=checksums)
@@ -97,17 +114,22 @@ def orderToken():
     keep = data["keep"]
     print("Bank will sign: " + keep[:16])
     # send requested tokens
-    response = requests.post("http://localhost:5000/fill-request", json={
+    unsigned_tokens = {
         "session_id": data.get("session_id"),
         "tokens": {key: value for key, value in tokens.items() if key != keep}
-    })
+    }
+    with open(os.path.join(_current_dir, "tokens", "(2) unsigned_tokens.json"), "w+") as token_output:
+        json.dump(unsigned_tokens, token_output, indent=4)
+
+    response = requests.post("http://localhost:5000/fill-request", json=unsigned_tokens)
     signature = None
-    try:
+    if response.ok:
         data = response.json()
         signature = int.from_bytes(bytes.fromhex(data.get("signature")), 'big')
-    except Exception as e:
-        print(e)
+
+    else:
         print("Fill request Failed: \n" + response.text)
+        exit(0)
 
     # validate signature
     token = tokens[keep]
@@ -124,31 +146,43 @@ def orderToken():
     # remove these from the token as they are no longer necessary
     del token["key"]
 
-    with open(os.path.join(_current_dir, "tokens", "token.json"), "w+") as token_output:
-        json.dump(token, token_output)
+    with open(os.path.join(_current_dir, "tokens", "signed_token.json"), "w+") as token_output:
+        json.dump(token, token_output, indent=4)
 
 
-def makePurchase():
+def makePurchase(modifiers):
+    print("Modifiers: " + str(modifiers))
     claim = None
-    with open(os.path.join(_current_dir, "tokens", "token.json")) as token_output:
+    with open(os.path.join(_current_dir, "tokens", "signed_token.json")) as token_output:
         claim = json.load(token_output)
     
     print("Sending token to purchase from merchant...")
-    pprint.pprint(claim)
     purchase_token = { key: value for key, value in claim.items() if key != "identity_keys" }
+    with open(os.path.join(_current_dir, "tokens", "purchase_token.json"), "w+") as token_output:
+        json.dump(purchase_token, token_output, indent=4)
     response = requests.post("http://localhost:5001/request-spend", json=purchase_token)
+    print("Recieved Bitstring from Merchant:")
     print(response.text)
+    if not response.ok:
+        print("Exiting...")
+        exit(1)
     data = response.json()
-    session_id = data.get("session_id")
-
+    session_id = data["session_id"]
+    print("Preparing Identity Keys...")
     keys = claim["identity_keys"]
     purchase_keys = [key[i] for key, i in zip(keys, data["bitstring"])]
-
-    response = requests.post("http://localhost:5001/fill-request", json={
+    with open(os.path.join(_current_dir, "tokens", "purchase_keys.json"), "w+") as token_output:
+        json.dump(purchase_keys, token_output, indent=4)
+    url = "http://localhost:5001/fill-request"
+    if modifiers and modifiers[0] == "malicious":
+        url += "-malicious"
+    response = requests.post(url, json={
         "session_id": session_id,
         "keys": purchase_keys
     })
-    print(response)
+
+    print("Merchant Response: ")
+    print(response.text)
 
 
 if __name__ == "__main__":
@@ -156,7 +190,11 @@ if __name__ == "__main__":
         command = sys.argv[1]
     except IndexError as e:
         command = "order"
+    try:
+        modifiers = sys.argv[2:]
+    except IndexError as e:
+        modifiers = ["normal"]
     {
         "order": orderToken,
         "purchase": makePurchase
-    }[command]()
+    }[command](modifiers)

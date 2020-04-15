@@ -22,3 +22,6 @@ def aes_decrypt(enc: bytes, key:bytes) -> bytes:
             enc[AES.block_size:]
             )
         )
+
+def xor_bytes(a:bytes, b:bytes) -> bytes:
+    return bytes(tuple(_a ^ _b for _a, _b in zip(a, b)))
